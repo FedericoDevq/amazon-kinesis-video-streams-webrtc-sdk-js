@@ -53,6 +53,7 @@ function getFormValues() {
         useTrickleICE: $('#useTrickleICE').is(':checked'),
         natTraversalDisabled: $('#natTraversalDisabled').is(':checked'),
         forceTURN: $('#forceTURN').is(':checked'),
+        alexa: $('#alexa').is(':checked'),
         accessKeyId: $('#accessKeyId').val(),
         endpoint: $('#endpoint').val() || null,
         secretAccessKey: $('#secretAccessKey').val(),

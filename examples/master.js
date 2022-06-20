@@ -1,3 +1,7 @@
+/*global AWS
+KVSWebRTC*/
+
+
 /**
  * This file demonstrates the process of starting WebRTC streaming using a KVS Signaling Channel.
  */
@@ -10,6 +14,7 @@ const master = {
     peerConnectionStatsInterval: null,
 };
 
+// eslint-disable-next-line no-unused-vars
 async function startMaster(localView, remoteView, formValues, onStatsReport, onRemoteDataMessage) {
     master.localView = localView;
     master.remoteView = remoteView;
@@ -64,33 +69,39 @@ async function startMaster(localView, remoteView, formValues, onStatsReport, onR
     });
 
     // Get ICE server configuration
-    const kinesisVideoSignalingChannelsClient = new AWS.KinesisVideoSignalingChannels({
-        region: formValues.region,
-        accessKeyId: formValues.accessKeyId,
-        secretAccessKey: formValues.secretAccessKey,
-        sessionToken: formValues.sessionToken,
-        endpoint: endpointsByProtocol.HTTPS,
-        correctClockSkew: true,
-    });
-    const getIceServerConfigResponse = await kinesisVideoSignalingChannelsClient
-        .getIceServerConfig({
-            ChannelARN: channelARN,
-        })
-        .promise();
     const iceServers = [];
-    if (!formValues.natTraversalDisabled && !formValues.forceTURN) {
+
+    if (!formValues.alexa) {
+        const kinesisVideoSignalingChannelsClient = new AWS.KinesisVideoSignalingChannels({
+            region: formValues.region,
+            accessKeyId: formValues.accessKeyId,
+            secretAccessKey: formValues.secretAccessKey,
+            sessionToken: formValues.sessionToken,
+            endpoint: endpointsByProtocol.HTTPS,
+            correctClockSkew: true,
+        });
+        const getIceServerConfigResponse = await kinesisVideoSignalingChannelsClient
+            .getIceServerConfig({
+                ChannelARN: channelARN,
+            })
+            .promise();
+        if (!formValues.natTraversalDisabled && !formValues.forceTURN) {
+            iceServers.push({ urls: `stun:stun.kinesisvideo.${formValues.region}.amazonaws.com:443` });
+        }
+        if (!formValues.natTraversalDisabled) {
+            getIceServerConfigResponse.IceServerList.forEach(iceServer =>
+                iceServers.push({
+                    urls: iceServer.Uris,
+                    username: iceServer.Username,
+                    credential: iceServer.Password,
+                }),
+            );
+        }
+        console.log('[MASTER] ICE servers: ', iceServers);
+    } else {
         iceServers.push({ urls: `stun:stun.kinesisvideo.${formValues.region}.amazonaws.com:443` });
     }
-    if (!formValues.natTraversalDisabled) {
-        getIceServerConfigResponse.IceServerList.forEach(iceServer =>
-            iceServers.push({
-                urls: iceServer.Uris,
-                username: iceServer.Username,
-                credential: iceServer.Password,
-            }),
-        );
-    }
-    console.log('[MASTER] ICE servers: ', iceServers);
+
 
     const configuration = {
         iceServers,
@@ -148,16 +159,28 @@ async function startMaster(localView, remoteView, formValues, onStatsReport, onR
                     console.log('[MASTER] Sending ICE candidate to client: ' + remoteClientId);
                     master.signalingClient.sendIceCandidate(candidate, remoteClientId);
                 }
-            } else {
-                console.log('[MASTER] All ICE candidates have been generated for client: ' + remoteClientId);
-
-                // When trickle ICE is disabled, send the answer now that all the ICE candidates have ben generated.
-                if (!formValues.useTrickleICE) {
-                    console.log('[MASTER] Sending SDP answer to client: ' + remoteClientId);
-                    master.signalingClient.sendSdpAnswer(peerConnection.localDescription, remoteClientId);
-                }
             }
         });
+
+        if (!formValues.useTrickleICE) {
+            // Add listener to know when all ICE candidates have been generated
+            peerConnection.addEventListener('icegatheringstatechange', (event) => {
+                console.log('[MASTER] ICE Gathering State: ' + peerConnection.iceGatheringState);
+                switch (peerConnection.iceGatheringState) {
+                    case 'failed':
+                        console.log('[MASTER] Fail to gather ICE candidate: ', event)
+                        stopMaster();
+                        break;
+                    case 'complete':
+                        console.log('[MASTER] All ICE candidates have been generated for client: ' + remoteClientId);
+                        console.log('[MASTER] Sending SDP Answer for remoteId: ', remoteClientId)
+                        var answer = peerConnection.localDescription;
+                        console.log('[MASTER] SDP Answer: ', answer.sdp)
+                        master.signalingClient.sendSdpAnswer(peerConnection.localDescription, remoteClientId);
+                        break;
+                }
+            });
+        }
 
         // As remote tracks are received, add them to the remote view
         peerConnection.addEventListener('track', event => {
@@ -165,6 +188,7 @@ async function startMaster(localView, remoteView, formValues, onStatsReport, onR
             if (remoteView.srcObject) {
                 return;
             }
+            
             remoteView.srcObject = event.streams[0];
         });
 
@@ -249,6 +273,7 @@ function stopMaster() {
     }
 }
 
+// eslint-disable-next-line no-unused-vars
 function sendMasterMessage(message) {
     Object.keys(master.dataChannelByClientId).forEach(clientId => {
         try {
